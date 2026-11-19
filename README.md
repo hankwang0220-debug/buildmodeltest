@@ -2,6 +2,8 @@
 
 依「新店溪及景美溪匯流口護岸及景觀改善工程 細部設計圖（113 年 10 月）」與竣工測量點建立的 3D 模型，包含互動檢視器與可匯入 CAD／BIM 軟體的 OBJ 模型。
 
+**線上檢視：** https://hankwang0220-debug.github.io/buildmodeltest/
+
 ## 內容
 
 | 路徑 | 說明 |
