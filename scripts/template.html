@@ -59,6 +59,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
 .lbl{position:absolute;transform:translate(-50%,-100%);font-size:12px;font-weight:700;color:#173022;white-space:nowrap;pointer-events:none;
   text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 6px #fff}
 .lbl.zone{font-size:15px;color:#7a2d1a}
+.lbl.fac{font-size:11.5px;color:#fff;background:var(--c);padding:1px 6px;border-radius:4px;text-shadow:none;box-shadow:0 1px 3px rgba(0,0,0,.35)}
 .lbl.small{font-weight:500;font-size:11px;color:#2b3d33}
 #labels{position:absolute;inset:0;pointer-events:none;overflow:hidden}
 .toggle{display:none}
@@ -107,6 +108,22 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
   </div>
   <div id="modelPanel" class="stack">
   <div class="grp">
+    <h2>本次施工</h2>
+    <label class="row hlrow"><input type="checkbox" id="HL">凸顯本次施工設施</label>
+    <div id="hlLegend" class="legend" hidden>
+      <span class="lg"><span class="sw" style="background:#ff961e"></span>新設鋪面（依實測步道） 7,518 m²</span>
+      <span class="lg"><span class="sw" style="background:#e6285a"></span>引水道及護岸（卵塊石 1,646 m²、植生袋 639 m²）</span>
+      <span class="lg"><span class="sw" style="background:#ff6a00"></span>丁壩 13 座</span>
+      <span class="lg"><span class="sw" style="background:#18a8e0"></span>新設洗手台 4 座</span>
+      <span class="lg"><span class="sw" style="background:#7a52d6"></span>跌水工（圖示 3／數量表 4 座）</span>
+      <span class="lg"><span class="sw" style="background:#b3622d"></span>疊石 2 座</span>
+      <span class="lg"><span class="sw" style="background:#22a36b"></span>鳥踏區 5 處</span>
+      <span class="lg"><span class="sw" style="background:#8a5a2b"></span>水中枯木微棲地 2 處</span>
+      <span class="lg"><span class="sw" style="background:#e0b020"></span>休憩座椅 40 m</span>
+      <button id="hlView" type="button">施工設施總覽視角</button>
+    </div>
+  </div>
+  <div class="grp">
     <h2>地形</h2>
     <label class="row"><input type="radio" name="surf" id="S-de" value="design" checked>設計完成地形（L-07 標高修正）</label>
     <label class="row"><input type="radio" name="surf" id="S-ex" value="existing">現況地形（L-03 高程點）</label>
@@ -122,6 +139,8 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
     <label class="row"><input type="checkbox" id="L-tree" checked><span class="sw" style="background:#4f7d3a"></span>既有喬木（L-08，黃綠＝區內移植）</label>
     <label class="row"><input type="checkbox" id="L-spots"><span class="sw" style="background:#1f5fa8"></span>高程點（藍＝L-03 現況，紅＝L-07 設計）</label>
     <label class="row"><input type="checkbox" id="L-water" checked><span class="sw" style="background:#5f8caa"></span>水面 EL1.0／生態池／引水道</label>
+    <label class="row"><input type="checkbox" id="L-flow" checked><span class="sw" style="background:linear-gradient(90deg,#4f86a8,#cfe6f5)"></span>河道水流動畫</label>
+    <label class="row"><input type="checkbox" id="L-newfac" checked><span class="sw" style="background:#ff961e"></span>新設施工設施（L-06）</label>
     <label class="row"><input type="checkbox" id="L-groyne" checked><span class="sw" style="background:#8d8a82"></span>丁壩 13 座（D-03）</label>
     <label class="row"><input type="checkbox" id="L-levee" checked><span class="sw" style="background:#b9b7ae"></span>堤防／水源快速道路</label>
     <label class="row"><input type="checkbox" id="L-light" checked><span class="sw" style="background:#e0b84a"></span>高燈（L-11）</label>
@@ -152,7 +171,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
 {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
 "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
 </script>
-<script>window.MODEL = __MODEL__; window.TEX = "__TEX__"; window.TEX2 = "__TEX2__";</script>
+<script>window.MODEL = __MODEL__; window.TEX = "__TEX__"; window.TEX2 = "__TEX2__"; window.TEX3 = "__TEX3__";</script>
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -179,6 +198,41 @@ const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(-300, 50
 const world = new THREE.Group(); scene.add(world);
 const layers = {};
 function layer(name){ if (layers[name]) return layers[name]; const g = new THREE.Group(); g.name = name; world.add(g); layers[name] = g; return g; }
+
+// ---------- animated water (flow-map ripples advected along flowDir) ----------
+const waterUniforms = [];
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function waterMat(hex, opacity, speed){
+  const u = { uTime: { value: 0 }, uColor: { value: new THREE.Color(hex) }, uOpacity: { value: opacity }, uSpeed: { value: speed }, uFlowOn: { value: reduceMotion ? 0 : 1 } };
+  waterUniforms.push(u);
+  return new THREE.ShaderMaterial({
+    uniforms: u, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    vertexShader: `attribute vec2 flowDir; varying vec2 vFlow; varying vec2 vP;
+      void main(){ vFlow = flowDir; vP = position.xz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `uniform float uTime, uOpacity, uSpeed, uFlowOn; uniform vec3 uColor; varying vec2 vFlow; varying vec2 vP;
+      float h(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float n(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(h(i), h(i + vec2(1, 0)), f.x), mix(h(i + vec2(0, 1)), h(i + vec2(1, 1)), f.x), f.y); }
+      float fbm(vec2 p){ return 0.55 * n(p) + 0.3 * n(p * 2.1 + 3.7) + 0.15 * n(p * 4.3 + 9.1); }
+      vec2 rot(vec2 p, vec2 d){ return vec2(dot(p, d), dot(p, vec2(-d.y, d.x))); }
+      void main(){
+        vec2 d = normalize(vFlow + 1e-5); float t = uTime * uSpeed * uFlowOn;
+        float ph0 = fract(t * 0.25), ph1 = fract(t * 0.25 + 0.5);
+        vec2 q = rot(vP, d) * vec2(0.18, 0.55);              // ripples stretched along the flow
+        float a = fbm(q - vec2(ph0 * 2.2, 0.0)), b = fbm(q - vec2(ph1 * 2.2, 0.0) + 17.0);
+        float w = abs(1.0 - 2.0 * ph0), pat = mix(a, b, w);
+        vec3 c = uColor * (0.82 + 0.36 * pat) + vec3(0.9, 0.95, 1.0) * smoothstep(0.66, 0.8, pat) * 0.22;
+        gl_FragColor = vec4(c, uOpacity);
+      }`
+  });
+}
+function stripFlow(geo, pts){
+  // per-vertex direction along a strip built as [left,right] pairs; oriented from higher to lower water surface
+  const sign = pts.length > 1 && pts[0][2] < pts[pts.length - 1][2] ? -1 : 1, fd = [];
+  pts.forEach((p, i) => { const a = pts[Math.max(i - 1, 0)], b = pts[Math.min(i + 1, pts.length - 1)];
+    let dx = b[0] - a[0], dy = b[1] - a[1]; const l = Math.hypot(dx, dy) || 1; dx *= sign / l; dy *= sign / l; fd.push(dx, dy, dx, dy); });
+  geo.setAttribute('flowDir', new THREE.Float32BufferAttribute(fd, 2));
+}
 
 // ---------- terrain ----------
 const nu = meta.nu, nv = meta.nv, st = meta.step;
@@ -239,8 +293,20 @@ function heightUV(u, v){
 // ---------- water ----------
 {
   const L = layer('water');
-  const wg = new THREE.PlaneGeometry(meta.U, meta.V); wg.rotateX(-Math.PI / 2); wg.translate(meta.U / 2, 1.0, meta.V / 2);
-  L.add(new THREE.Mesh(wg, new THREE.MeshPhongMaterial({ color: 0x4f86a8, transparent: true, opacity: 0.62, shininess: 80, depthWrite: false })));
+  const wg = new THREE.PlaneGeometry(meta.U, meta.V, 160, 56); wg.rotateX(-Math.PI / 2); wg.translate(meta.U / 2, 1.0, meta.V / 2);
+  // flow direction per vertex = tangent of the nearest river centreline (景美溪 / 新店溪, listed downstream)
+  const lines = M.flow ? [M.flow.jm, M.flow.xd] : [];
+  const pa = wg.attributes.position.array, fd = new Float32Array(pa.length / 3 * 2);
+  for (let i = 0; i < pa.length / 3; i++) {
+    const u = pa[i * 3], v = pa[i * 3 + 2]; let bd = 1e18, dx = 1, dy = 0;
+    for (const ln of lines) for (let k = 0; k < ln.length - 1; k++) {
+      const ax = ln[k][0], ay = ln[k][1], bx = ln[k + 1][0], by = ln[k + 1][1], ex = bx - ax, ey = by - ay, l2 = ex * ex + ey * ey;
+      const t = Math.max(0, Math.min(1, ((u - ax) * ex + (v - ay) * ey) / l2)), qx = ax + ex * t - u, qy = ay + ey * t - v, d = qx * qx + qy * qy;
+      if (d < bd) { bd = d; const l = Math.sqrt(l2); dx = ex / l; dy = ey / l; } }
+    fd[i * 2] = dx; fd[i * 2 + 1] = dy;
+  }
+  wg.setAttribute('flowDir', new THREE.BufferAttribute(fd, 2));
+  L.add(new THREE.Mesh(wg, waterMat(0x4f86a8, 0.66, 1.0)));
   const sh = new THREE.Shape(M.lagoon.map(p => new THREE.Vector2(p[0], p[1])));
   sh.holes.push(new THREE.Path(M.lagoonIsland.map(p => new THREE.Vector2(p[0], p[1]))));
   const lg = new THREE.ShapeGeometry(sh); lg.rotateX(Math.PI / 2); lg.translate(0, 2.8, 0);   // L-07-5: WS+2.8
@@ -369,7 +435,8 @@ function heightUV(u, v){
       pos.push(p[0] + nx, p[2], p[1] + ny, p[0] - nx, p[2], p[1] - ny); });
     for (let i = 0; i < ch.length - 1; i++) { const a = i * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx);
-    L.add(new THREE.Mesh(g, new THREE.MeshPhongMaterial({ color: 0x4a8fb0, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false })));
+    stripFlow(g, ch);
+    L.add(new THREE.Mesh(g, waterMat(0x4a8fb0, 0.85, 1.6)));
   }
 }
 
@@ -381,6 +448,74 @@ function heightUV(u, v){
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   L.add(new THREE.Points(g, new THREE.PointsMaterial({ size: 4, sizeAttenuation: false, vertexColors: true, depthTest: false })));
   L.visible = false;
+}
+
+// ---------- new construction (L-06 數量表): paving / revetment overlay + facility objects ----------
+const FAC = M.newFacilities || [];
+const FACCOL = { wash: 0x18a8e0, drop: 0x7a52d6, rock: 0xb3622d, perch: 0x22a36b, log: 0x8a5a2b, bench: 0xe0b020 };
+const facMeshes = [], beacons = [];
+{
+  const L = layer('newfac');
+  if (window.TEX3 && window.TEX3.length > 20) {
+    const t = new THREE.TextureLoader().load(window.TEX3); t.colorSpace = THREE.SRGBColorSpace;
+    const ov = new THREE.Mesh(window.TERRAIN.geometry, new THREE.MeshBasicMaterial({ map: t, transparent: true, opacity: 0.55, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
+    ov.renderOrder = 2; L.add(ov); window.OVERLAY = ov;
+  }
+  const stone = new THREE.MeshStandardMaterial({ color: 0x9a8f80, roughness: 0.9, flatShading: true });
+  const wood = new THREE.MeshStandardMaterial({ color: 0x7b5634, roughness: 0.85 });
+  const conc = new THREE.MeshStandardMaterial({ color: 0xd8d6d0, roughness: 0.7 });
+  const rnd = (s => () => (s = (s * 16807) % 2147483647) / 2147483647)(7);
+  const rockG = new THREE.DodecahedronGeometry(1, 0);
+  for (const f of FAC) {
+    const g = new THREE.Group(), [u, v] = f.uv; let z = heightUV(u, v);
+    if (f.kind === 'perch' || f.kind === 'log') z = Math.max(z, 2.5);
+    if (f.kind === 'wash') {
+      const b = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.85, 0.7), conc); b.position.y = 0.43; g.add(b);
+      const tap = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.35), new THREE.MeshStandardMaterial({ color: 0x8899aa, metalness: 0.6 }));
+      tap.position.set(0, 1.0, -0.2); g.add(tap);
+    } else if (f.kind === 'drop') {
+      for (let k = 0; k < 3; k++) { const s = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.35, 0.9), stone); s.position.set(0, 0.5 - k * 0.25, (k - 1) * 0.9); g.add(s); }
+    } else if (f.kind === 'rock') {
+      for (let k = 0; k < 16; k++) { const r = 0.5 + rnd() * 0.8, m = new THREE.Mesh(rockG, stone);
+        m.scale.setScalar(r); m.position.set((rnd() - 0.5) * 7, r * 0.5, (rnd() - 0.5) * 4); m.rotation.set(rnd() * 3, rnd() * 3, 0); g.add(m); }
+    } else if (f.kind === 'perch') {
+      for (let k = 0; k < 12; k++) { const a = k / 12 * Math.PI * 2, m = new THREE.Mesh(rockG, stone);
+        m.scale.set(0.35, 0.3, 0.35); m.position.set(Math.cos(a) * 2.2, 0.25, Math.sin(a) * 1.2); g.add(m); }
+    } else if (f.kind === 'log') {
+      for (let k = 0; k < 3; k++) { const m = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 4 - k, 8), wood);
+        m.rotation.z = Math.PI / 2; m.rotation.y = k * 0.9; m.position.y = 0.25 + k * 0.15; g.add(m); }
+    } else if (f.kind === 'bench') {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(f.len, 0.45, 0.45), conc); m.position.y = 0.23; g.add(m);
+      g.rotation.y = -f.rot;
+    }
+    g.position.set(u, z, v); g.traverse(o => { o.userData.fac = f; }); L.add(g); facMeshes.push(g);
+    // highlight beacon: coloured pin + pulsing ground ring
+    const col = FACCOL[f.kind];
+    const pin = new THREE.Group();
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 7, 6), new THREE.MeshBasicMaterial({ color: col }));
+    stem.position.y = 3.5; pin.add(stem);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.7, 12, 8), new THREE.MeshBasicMaterial({ color: col })); head.position.y = 7.2; pin.add(head);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(1.8, 2.4, 32), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
+    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.15; ring.userData.ring = true; pin.add(ring);
+    pin.position.set(u, z, v); pin.visible = false; pin.traverse(o => { o.userData.fac = f; }); L.add(pin); beacons.push(pin);
+  }
+}
+let HL = false;
+const groyneMat = layers.groyne.children[0] ? layers.groyne.children[0].material : null;
+function setHighlight(on){
+  HL = on;
+  const tm = window.TERRAIN.material;
+  tm.color.set(on ? 0x8f9590 : 0xffffff);
+  beacons.forEach(b => { b.visible = on; });
+  if (window.OVERLAY) window.OVERLAY.material.opacity = on ? 0.9 : 0.55;
+  if (groyneMat) { groyneMat.emissive = new THREE.Color(on ? 0xff6a00 : 0x000000); groyneMat.emissiveIntensity = on ? 0.6 : 0; }
+  for (const n of ['tree', 'light', 'fence']) layers[n].traverse(o => { const m = o.material; if (!m) return;
+    if (m.userData.op0 === undefined) { m.userData.op0 = m.opacity; m.userData.t0 = m.transparent; }
+    m.transparent = on ? true : m.userData.t0; m.opacity = on ? Math.min(0.22, m.userData.op0) : m.userData.op0; m.needsUpdate = true; });
+  layers.newfac.visible = on || document.getElementById('L-newfac').checked;
+  document.getElementById('hlLegend').hidden = !on;
+  for (const it of labelItems) if (it.hl) it.el.hidden = !on;
 }
 
 // ---------- point cloud mode: survey points coloured by attribute ----------
@@ -426,7 +561,8 @@ let cloudMode = false;
 function setMode(on){
   cloudMode = on;
   layers.cloud.visible = on;
-  for (const n of ['terrain', 'water', 'groyne', 'levee', 'light', 'fence', 'tree', 'spots', 'survey']) {
+  if (on && HL) { document.getElementById('HL').checked = false; setHighlight(false); }
+  for (const n of ['terrain', 'water', 'groyne', 'levee', 'light', 'fence', 'tree', 'spots', 'survey', 'newfac']) {
     const el = document.getElementById('L-' + n);
     layers[n].visible = on ? (n === 'terrain' ? document.getElementById('C-ground').checked : false) : (el ? el.checked : true);
   }
@@ -445,9 +581,18 @@ for (const l of M.labels) addLabel(l.t, l.uv[0], l.uv[1], (l.t === '水源快速
 for (const g of M.groynes) addLabel(g.name, g.tip[0], g.tip[1], 3.5, 'small');
 for (const f of M.fields) { const c = f.poly.reduce((a, p) => [a[0] + p[0] / f.poly.length, a[1] + p[1] / f.poly.length], [0, 0]); addLabel(f.name, c[0], c[1], heightUV(c[0], c[1]) + 2, 'small'); }
 addLabel('生態池（水域棲地）', 520, 165, 5, 'small');
+{ const shortN = { wash: '洗手台', drop: '跌水工', rock: '疊石', perch: '鳥踏區', log: '枯木微棲地' }; let benchDone = false;
+  for (const f of FAC) {
+    if (f.kind === 'bench') { if (benchDone) continue; benchDone = true; }
+    addLabel(f.kind === 'bench' ? '休憩座椅 40 m' : shortN[f.kind], f.uv[0], f.uv[1], heightUV(f.uv[0], f.uv[1]) + 9, 'fac');
+    const it = labelItems[labelItems.length - 1]; it.hl = true; it.el.hidden = true; it.el.style.setProperty('--c', '#' + new THREE.Color(FACCOL[f.kind]).getHexString()); } }
 
 // ---------- UI ----------
-const map = { 'L-terrain': 'terrain', 'L-water': 'water', 'L-groyne': 'groyne', 'L-levee': 'levee', 'L-light': 'light', 'L-fence': 'fence', 'L-survey': 'survey', 'L-tree': 'tree', 'L-spots': 'spots' };
+const map = { 'L-terrain': 'terrain', 'L-water': 'water', 'L-groyne': 'groyne', 'L-levee': 'levee', 'L-light': 'light', 'L-fence': 'fence', 'L-survey': 'survey', 'L-tree': 'tree', 'L-spots': 'spots', 'L-newfac': 'newfac' };
+document.getElementById('HL').addEventListener('change', e => setHighlight(e.target.checked));
+const flowChk = document.getElementById('L-flow'); if (reduceMotion) flowChk.checked = false;
+flowChk.addEventListener('change', () => waterUniforms.forEach(u => u.uFlowOn.value = flowChk.checked ? 1 : 0));
+document.getElementById('hlView').addEventListener('click', () => go('overview'));
 document.querySelectorAll('input[name="mode"]').forEach(r => r.addEventListener('change', () => r.checked && setMode(r.value === 'cloud')));
 document.querySelectorAll('input[name="cby"]').forEach(r => r.addEventListener('change', () => r.checked && colourCloud(r.value)));
 document.getElementById('C-ground').addEventListener('change', e => { layers.terrain.visible = e.target.checked; });
@@ -498,8 +643,14 @@ renderer.domElement.addEventListener('pointerup', e => {
     document.getElementById('readout').innerHTML = `<b>測點 ${p[3]}（${p[5]}）</b><br>圖說同位置：${p[6]}${offTxt}<br>E ${E.toFixed(3)}<br>N ${N.toFixed(3)}<br>實測 EL ${p[2].toFixed(3)}<br>設計 EL ${p[7].toFixed(2)}（差 ${dz >= 0 ? '+' : ''}${dz.toFixed(2)}）<br>施工前 EL ${p[8].toFixed(2)}（L-03）`;
     return;
   }
-  const hit = ray.intersectObjects([...layers.groyne.children, ...layers.terrain.children], false)[0];
+  const cand = [...(layers.newfac.visible ? facMeshes : []), ...(HL ? beacons : []), ...layers.groyne.children, ...layers.terrain.children];
+  const hit = ray.intersectObjects(cand, true).find(h => h.object.visible);
   if (!hit) return;
+  if (hit.object.userData.fac) {
+    const f = hit.object.userData.fac, [E, N] = toTWD(f.uv[0], f.uv[1]);
+    document.getElementById('readout').innerHTML = `<b>本次施工：${f.name}</b><br>${f.note}　詳圖 ${f.ref}<br>E ${E.toFixed(2)}<br>N ${N.toFixed(2)}<br>位置依 L-06 平面圖判讀`;
+    return;
+  }
   const p = hit.point, u = p.x, v = p.z, el = p.y / world.scale.y; const [E, N] = toTWD(u, v);
   const g = hit.object.userData && hit.object.userData.name ? hit.object.userData : null;
   const ex = hEx(u, v), de = hDe(u, v), dz = de - ex;
@@ -511,7 +662,16 @@ renderer.domElement.addEventListener('pointerup', e => {
 
 addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 const tmp = new THREE.Vector3();
+const clock = new THREE.Clock();
 function tick(){
+  const t = clock.getElapsedTime();
+  for (const u of waterUniforms) u.uTime.value = t;
+  if (HL) {
+    const s = 1 + 0.35 * (0.5 + 0.5 * Math.sin(t * 3)), op = 0.45 + 0.4 * (0.5 + 0.5 * Math.sin(t * 3));
+    for (const b of beacons) { const r = b.children[2]; r.scale.setScalar(s); r.material.opacity = 1.1 - op; }
+    if (window.OVERLAY) window.OVERLAY.material.opacity = 0.7 + 0.25 * Math.sin(t * 2.2);
+    if (groyneMat) groyneMat.emissiveIntensity = 0.35 + 0.35 * (0.5 + 0.5 * Math.sin(t * 3));
+  }
   controls.update(); renderer.render(scene, camera);
   if (!labelBox.hidden) for (const it of labelItems) {
     tmp.copy(it.p); tmp.y *= world.scale.y; tmp.project(camera);

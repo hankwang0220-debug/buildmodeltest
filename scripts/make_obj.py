@@ -88,6 +88,20 @@ for t in M.get('trees', []):
     for f in [(0,2,4),(2,1,4),(1,3,4),(3,0,4),(2,0,5),(1,2,5),(3,1,5),(0,3,5)]:
         L.append('f ' + ' '.join(str(vi + k) for k in f))
     vi += 6
+# new-construction facilities (L-06): simple blocks sized by type
+SZ = dict(wash=(1.4, 0.7, 0.85), drop=(4.2, 2.7, 0.6), rock=(7, 4, 1.4), perch=(4.4, 2.4, 0.4), log=(4, 1, 0.6), bench=(4.4, 0.45, 0.45))
+for k_, f in enumerate(M.get('newFacilities', [])):
+    u, v = f['uv']; z0 = hz(u, v); E, N = en(u, v); lx, ly, h = SZ[f['kind']]
+    if f['kind'] in ('perch', 'log'): z0 = max(z0, 2.5)
+    th = -f.get('rot', 0.0); c_, s_ = math.cos(th), math.sin(th)
+    obj(f'new_{f["kind"]}_{k_ + 1}', 'newfac')
+    for z in (z0, z0 + h):
+        for dx, dy in [(-lx/2, -ly/2), (lx/2, -ly/2), (lx/2, ly/2), (-lx/2, ly/2)]:
+            # rotation is in plan (u,v); v grows southward while N grows northward, so flip the sign
+            L.append(f'v {E + dx*c_ - dy*s_:.3f} {N - (dx*s_ + dy*c_):.3f} {z:.3f}')
+    for f4 in [(0,1,2,3),(4,7,6,5),(0,4,5,1),(1,5,6,2),(2,6,7,3),(3,7,4,0)]:
+        L.append('f ' + ' '.join(str(vi + q) for q in f4))
+    vi += 8
 hdr = ['# 新店溪及景美溪匯流口護岸及景觀改善工程 3D model',
        '# objects: terrain_design (L-07), terrain_existing (L-03), water_EL1.0, groyne_*, levee_expressway, lights (L-11), tree_*/crown_* (L-08)', f'# Z-up, metres. X = TWD97 E - {OE:.0f}, Y = TWD97 N - {ON:.0f}, Z = elevation',
        'mtllib model.mtl']
@@ -109,5 +123,7 @@ newmtl trunk
 Kd 0.43 0.32 0.21
 newmtl crown
 Kd 0.31 0.49 0.23
+newmtl newfac
+Kd 1.0 0.55 0.1
 """)
 print('vertices', vi - 1)
