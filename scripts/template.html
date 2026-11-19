@@ -40,6 +40,8 @@ button:hover{border-color:var(--accent);color:var(--accent)}
 button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 [hidden]{display:none!important}
 .stack{display:flex;flex-direction:column;gap:14px}
+kbd{font-family:var(--f-num);font-size:11px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;margin:0 2px 0 0;background:var(--bg);color:var(--fg)}
+@media (hover:none){.keyhelp{display:none}}
 .card{border:1px solid var(--line);border-radius:8px;padding:8px 10px;display:block}
 .card summary{cursor:pointer;font-size:13px;font-weight:700;list-style-position:inside}
 .card[open] summary{margin-bottom:8px}
@@ -191,6 +193,10 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
     <label class="row"><input type="checkbox" id="L-survey"><span class="sw" style="background:#d2452f"></span>竣工測量點（2,361 點）</label>
     <label class="row"><input type="checkbox" id="L-label" checked><span class="sw" style="background:transparent"></span>標註</label>
   </div>
+  </div>
+  <div class="grp keyhelp">
+    <h2>操作</h2>
+    <div class="note"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 或方向鍵：前後左右移動<br><kbd>Q</kbd>／<kbd>E</kbd>：下降／上升　按住 <kbd>Shift</kbd> 加速<br>滑鼠左鍵拖曳旋轉、右鍵拖曳平移、滾輪縮放</div>
   </div>
   <div class="grp">
     <h2>高程誇張</h2>
@@ -808,9 +814,44 @@ renderer.domElement.addEventListener('pointerup', e => {
 
 addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 const tmp = new THREE.Vector3();
+// ---------- keyboard: WASD / arrows pan along the ground, Q/E down/up, Shift = faster ----------
+const keys = new Set();
+const typing = e => /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && !/checkbox|radio|range/.test(e.target.type);
+addEventListener('keydown', e => {
+  if (typing(e) || e.ctrlKey || e.metaKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (['w','a','s','d','q','e','arrowup','arrowdown','arrowleft','arrowright','shift'].includes(k)) {
+    keys.add(k); if (k.startsWith('arrow')) e.preventDefault();
+  }
+});
+addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
+addEventListener('blur', () => keys.clear());
+const fwd = new THREE.Vector3(), side = new THREE.Vector3(), mv = new THREE.Vector3();
+function keyMove(dt){
+  if (!keys.size) return;
+  camera.getWorldDirection(fwd); fwd.y = 0;
+  if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1);
+  fwd.normalize(); side.crossVectors(fwd, camera.up).normalize();
+  mv.set(0, 0, 0);
+  if (keys.has('w') || keys.has('arrowup')) mv.add(fwd);
+  if (keys.has('s') || keys.has('arrowdown')) mv.sub(fwd);
+  if (keys.has('d') || keys.has('arrowright')) mv.add(side);
+  if (keys.has('a') || keys.has('arrowleft')) mv.sub(side);
+  let up = 0; if (keys.has('e')) up += 1; if (keys.has('q')) up -= 1;
+  // speed scales with camera distance so it feels the same zoomed in or out
+  const dist = camera.position.distanceTo(controls.target);
+  const sp = Math.max(6, dist * 0.35) * (keys.has('shift') ? 3 : 1) * dt;
+  if (mv.lengthSq()) mv.normalize().multiplyScalar(sp);
+  mv.y = up * sp * 0.6;
+  if (camera.position.y + mv.y < 3) mv.y = 3 - camera.position.y;
+  camera.position.add(mv); controls.target.add(mv);
+}
+
 const clock = new THREE.Clock();
+let lastT = 0;
 function tick(){
   const t = clock.getElapsedTime();
+  keyMove(Math.min(t - lastT, 0.1)); lastT = t;
   for (const u of waterUniforms) u.uTime.value = t;
   if (GFX) {
     const tt = flowChk.checked ? t : 0;
