@@ -82,7 +82,11 @@ def dens(line, z, step=6):
 river = dens(jm_bed, 0.3) + dens(xd_bed, 0.3) + dens(jm_toe, 1.0) + dens(xd_toe, 1.0) + dens(jm_far, 2.0)
 st = cKDTree(spots[:, :2])
 river = [(p, z) for p, z in river if st.query(p)[0] > 20]       # only where L-03 has no data
-base_pts = [((u, w), z) for u, w, z in spots] + river
+# the 2025.08 survey is the reference: drop L-03 spot heights within 4 m of any survey point
+svp = np.array([p for nm, p, z in survey if not nm.startswith('db') and inside(*p)])
+near_sv = cKDTree(svp).query(spots[:, :2])[0] < 4.0
+print('L-03 spots replaced by survey', int(near_sv.sum()))
+base_pts = [((u, w), z) for (u, w, z), ns in zip(spots, near_sv) if not ns] + river
 base_pts += [(p, z) for nm, p, z in survey if not nm.startswith('db') and inside(*p)]
 def surface(pts):
     P = np.array([p for p, z in pts]); Z = np.array([z for p, z in pts])
@@ -167,9 +171,14 @@ F = 3.0
 TW, TH = int((X1 - X0) * F), int((Y1 - Y0) * F)
 rect = dict(A=(78,322), B=(410,110), C=(410,322), D=(745,110), E=(745,322), F=(1077,110), G=(1077,322))
 def mosaic(first):
-    out = np.full((TH, TW), 255, np.uint8)
     ty, tx = np.mgrid[0:TH, 0:TW].astype(np.float32)
     ipx = (X0 + (tx + 0.5) / F) * K; ipy = (Y0 + (ty + 0.5) / F) * K    # index full-res px
+    # fall back to the full-site plan (sheet 27) wherever no zone sheet covers the pixel
+    idx27 = Image.open(f'{DD}/1130070-027.tif').convert('L')
+    out = np.asarray(idx27.crop((int(X0*K), int(Y0*K), int(X1*K), int(Y1*K))).resize((TW, TH), Image.LANCZOS)).copy()
+    big = Image.fromarray(out).filter(ImageFilter.MaxFilter(9))
+    zl = (np.asarray(big.point(lambda v: 255 if v < 110 else 0).filter(ImageFilter.MaxFilter(13))) > 0)
+    out[zl] = 255                                          # drop the big zone letters of the index sheet
     for i, zn in enumerate('ABCDEFG'):
         n = first + i
         rx, ry = rect[zn]
@@ -181,7 +190,8 @@ def mosaic(first):
         f = 4; small = np.asarray(im.resize((im.width // f, im.height // f), Image.BOX))
         W, H = im.size
         ok = sel & (zx > W*0.02) & (zx < W*0.905) & (zy > H*0.04) & (zy < H*0.72)
-        if zn in 'BDF': ok &= zy > H * 0.27            # legend tables sit at the top of these sheets
+        if zn in 'BDF':
+            ok = sel & (zx > W*0.02) & (zx < W*0.905) & (zy > H*0.27) & (zy < H*0.86)   # tables on top; map runs lower
         smp = cv2.remap(small, (zx / f).astype(np.float32), (zy / f).astype(np.float32), cv2.INTER_AREA if False else cv2.INTER_LINEAR, borderValue=255)
         out[ok] = np.minimum(out[ok], smp[ok]) if False else smp[ok]
     return out
@@ -224,6 +234,7 @@ def colorize(lines, H):
     out = arr * (1 - 0.62 * dk[..., None])
     return Image.fromarray(np.clip(out, 0, 255).astype(np.uint8))
 L06 = mosaic(28); L09 = mosaic(56)
+np.save(OUTDIR + '/L06.npy', L06)
 colorize(L06, H_de).save(OUTDIR + '/tex_paving.jpg', quality=80)
 colorize(L09, H_de).save(OUTDIR + '/tex_planting.jpg', quality=80)
 Image.open(OUTDIR + '/tex_paving.jpg').resize((TW // 3, TH // 3)).save(OUTDIR + '/tex_paving_small.png')
@@ -234,8 +245,78 @@ db = sorted([(p, z, nm) for nm, p, z in survey if nm.startswith('db')], key=lamb
 v1 = json.load(open(OUTDIR + '/model.json', encoding='utf-8'))
 def enc(H): return base64.b64encode(np.round(H * 100).astype('<i2').tobytes()).decode()
 model = dict(v1)
+# ---------- survey point attribution: what the drawings show at each measured point ----------
+def pip(pt, poly):
+    x, y = pt; ins = False; n_ = len(poly)
+    for i_ in range(n_):
+        x1, y1 = poly[i_]; x2, y2 = poly[(i_ + 1) % n_]
+        if (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / (y2 - y1) + x1: ins = not ins
+    return ins
+def seg_dist(p, a_, b_):
+    p, a_, b_ = map(np.asarray, (p, a_, b_)); ab = b_ - a_; t_ = np.clip(np.dot(p - a_, ab) / max(np.dot(ab, ab), 1e-9), 0, 1)
+    return float(np.linalg.norm(p - (a_ + t_ * ab)))
+fpolys = [(fl['name'], [px2uv(q) for q in fl['poly']]) for fl in fields]
+lag_uv = [px2uv(q) for q in lagoon]; isl_uv = [px2uv(q) for q in lagoon_island]
+gro = v1['groynes'] if 'v1' in dir() else json.load(open(OUTDIR + '/model.json', encoding='utf-8'))['groynes']
+lit = [(l['name'], l['uv']) for l in light_objs]
+dark = (L06 < 128).astype(np.float32)
+integ = cv2.integral(dark)
+rpx = int(1.5 / MPP * F)
+def pave_density(u, w):
+    x, y = int(u / MPP * F), int(w / MPP * F)
+    x0_, x1_, y0_, y1_ = max(x - rpx, 0), min(x + rpx, TW - 1), max(y - rpx, 0), min(y + rpx, TH - 1)
+    if x1_ <= x0_ or y1_ <= y0_: return 0.0
+    return float((integ[y1_, x1_] - integ[y0_, x1_] - integ[y1_, x0_] + integ[y0_, x0_]) / ((x1_ - x0_) * (y1_ - y0_)))
+# paving = hatched areas on the L-06 mosaic (dense short strokes); distance (px) from every pixel to the nearest paving
+# at mosaic resolution the paving hatch reads as light-grey bands between the edge lines
+bl_ = cv2.blur(L06.astype(np.float32), (9, 9))
+pmask = ((bl_ < 244) & (bl_ > 150)).astype(np.uint8)
+pmask = cv2.morphologyEx(pmask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+pdist = cv2.distanceTransform(1 - pmask, cv2.DIST_L2, 3)
+Image.fromarray(pmask * 255).resize((TW // 3, TH // 3)).save(OUTDIR + '/paving_mask.png')
+codes = {'RD': '步道', '2RD': '步道', '3RD': '步道', 'db': '丁壩', 'RI': '河岸', 'wb': '水邊', 'ty': '其他', 'sos': '其他',
+         'GB': '其他', 'bb': '基準點', 'base': '基準點'}
+H_l03 = surface([((u, w), z) for u, w, z in spots] + river)   # pre-construction surface from L-03 only
+sv_out = []
+for nm, p, z in survey:
+    if not inside(*p): continue
+    u, w = p; code = re.sub(r'\d+$', '', nm)
+    obj = ''
+    for g in gro:
+        if seg_dist(p, g['root'], g['tip']) < 4.0: obj = '丁壩 ' + g['name']; break
+    if not obj:
+        for nm_, poly in fpolys:
+            if pip(p, poly): obj = nm_; break
+    if not obj and pip(p, lag_uv): obj = '生態池島' if pip(p, isl_uv) else '生態池'
+    if not obj:
+        for ln, luv in lit:
+            if math.dist(p, luv) < 2.0: obj = '高燈 ' + ln; break
+    if not obj and w >= wall_v(u) - 1: obj = '堤防／快速道路'
+    off = 0.0
+    if not obj:
+        x_, y_ = min(int(u / MPP * F), TW - 1), min(int(w / MPP * F), TH - 1)
+        off = float(pdist[y_, x_]) * MPP / F
+        obj = '設計鋪面' if off < 1.0 else '設計綠地'
+    dz_ = hat(H_de, u, w); l03 = hat(H_l03, u, w)
+    sv_out.append([round(u, 2), round(w, 2), round(z, 3), nm, code, codes.get(code, '其他'), obj, round(dz_, 2), round(l03, 2), round(off, 2)])
+from collections import Counter
+print('survey attribution', Counter(s[6].split(' ')[0] for s in sv_out).most_common())
+print('RD on designed paving', sum(1 for s in sv_out if s[4].endswith('RD') and s[6] == '設計鋪面'), 'of', sum(1 for s in sv_out if s[4].endswith('RD')))
+offs = np.array([s[9] for s in sv_out if s[4].endswith('RD')])
+print('RD offset from paving (m) percentiles 50/75/90/95/max', np.percentile(offs, [50, 75, 90, 95, 100]).round(2))
+# map: RD points coloured by offset on the paving mask
+mp = Image.fromarray(np.stack([L06] * 3, -1)).convert('RGB'); dm = ImageDraw.Draw(mp)
+for s in sv_out:
+    if not s[4].endswith('RD'): continue
+    x_, y_ = s[0] / MPP * F, s[1] / MPP * F; o = s[9]
+    col = (0, 160, 0) if o < 0.75 else (255, 160, 0) if o < 2 else (220, 0, 0)
+    dm.ellipse([x_ - 4, y_ - 4, x_ + 4, y_ + 4], fill=col)
+mp.save(OUTDIR + '/rd_offset.png')
+dd_ = np.array([s[2] - s[7] for s in sv_out if s[4].endswith('RD')])
+print('RD measured - design: mean', dd_.mean().round(2), 'abs median', np.median(np.abs(dd_)).round(2))
 model.update(heights=enc(H_ex), heightsDesign=enc(H_de), spots=[[round(u, 2), round(w, 2), round(z, 2)] for u, w, z in spots],
-             designPts=[[round(u, 2), round(w, 2), v, k] for u, w, v, k in design], channels=channels, trees=tree_objs)
+             designPts=[[round(u, 2), round(w, 2), v, k] for u, w, v, k in design], channels=channels, trees=tree_objs,
+             cloud=sv_out)
 if len(light_objs) >= 20:
     hz = lambda u, v: float(H_de[min(int(round(v / STEP)), nv - 1), min(int(round(u / STEP)), nu - 1)])
     model['lights'] = [dict(name=l['name'], uv=l['uv'], z=hz(*l['uv'])) for l in light_objs]

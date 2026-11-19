@@ -38,6 +38,19 @@ label.row input{accent-color:var(--accent);width:15px;height:15px;flex:none}
 button{font:500 12px var(--f-ui);border:1px solid var(--line);background:transparent;color:var(--fg);border-radius:6px;padding:6px 10px;cursor:pointer}
 button:hover{border-color:var(--accent);color:var(--accent)}
 button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+[hidden]{display:none!important}
+.stack{display:flex;flex-direction:column;gap:14px}
+.seg{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.seg label{cursor:pointer;text-align:center;font-size:13px}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg span{display:block;padding:7px 6px}
+.seg input:checked + span{background:var(--accent);color:var(--accent-fg);font-weight:500}
+.seg input:focus-visible + span{outline:2px solid var(--accent);outline-offset:-2px}
+.legend{display:flex;flex-direction:column;gap:4px;font-size:12px;margin-top:4px}
+.legend .lg{display:flex;align-items:center;gap:8px}
+.legend .bar{height:10px;border-radius:3px;background:linear-gradient(90deg,#2659d9,#5aa0b8,#e6e666,#e0703a,#d9331a)}
+.legend .barlab{display:flex;justify-content:space-between;color:var(--muted);font-size:11px}
+.range span{font-size:12px;color:var(--muted)}
 .note{font-size:11.5px;color:var(--muted);line-height:1.6}
 .readout{position:absolute;right:max(16px,env(safe-area-inset-right,0px));bottom:calc(14px + env(safe-area-inset-bottom,0px));
   background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font:12px/1.6 var(--f-num);
@@ -69,6 +82,31 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
     <div class="sub">細部設計圖（113.10）3D 模型 · TWD97 · 高程單位 m</div>
   </div>
   <div class="grp">
+    <h2>模式</h2>
+    <div class="seg" role="radiogroup" aria-label="顯示模式">
+      <label><input type="radio" name="mode" id="M-model" value="model" checked><span>模型</span></label>
+      <label><input type="radio" name="mode" id="M-cloud" value="cloud"><span>點雲（實測）</span></label>
+    </div>
+  </div>
+  <div id="cloudPanel" class="stack" hidden>
+    <div class="grp">
+      <h2>點雲著色</h2>
+      <label class="row"><input type="radio" name="cby" id="C-z" value="z" checked>實測高程</label>
+      <label class="row"><input type="radio" name="cby" id="C-obj" value="obj">圖說同位置物件</label>
+      <label class="row"><input type="radio" name="cby" id="C-off" value="off">步道與設計鋪面的偏離</label>
+      <label class="row"><input type="radio" name="cby" id="C-dz" value="dz">實測與設計高程差</label>
+      <label class="row"><input type="radio" name="cby" id="C-code" value="code">測點代碼</label>
+      <div id="cloudLegend" class="legend"></div>
+    </div>
+    <div class="grp">
+      <h2>顯示</h2>
+      <label class="row"><input type="checkbox" id="C-ground" checked>半透明設計地面</label>
+      <div class="range"><span>點大小</span><input type="range" id="C-size" min="2" max="10" step="1" value="5"></div>
+    </div>
+    <div class="note">點雲為 2025.08 竣工測量 2,361 點，以實測為準。點擊任一點可看點名、TWD97 座標、實測高程，以及圖說在同位置的物件、設計高程與施工前（L-03）高程。</div>
+  </div>
+  <div id="modelPanel" class="stack">
+  <div class="grp">
     <h2>地形</h2>
     <label class="row"><input type="radio" name="surf" id="S-de" value="design" checked>設計完成地形（L-07 標高修正）</label>
     <label class="row"><input type="radio" name="surf" id="S-ex" value="existing">現況地形（L-03 高程點）</label>
@@ -90,6 +128,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
     <label class="row"><input type="checkbox" id="L-fence" checked><span class="sw" style="background:#6c8f86"></span>球場圍網</label>
     <label class="row"><input type="checkbox" id="L-survey"><span class="sw" style="background:#d2452f"></span>竣工測量點（2,361 點）</label>
     <label class="row"><input type="checkbox" id="L-label" checked><span class="sw" style="background:transparent"></span>標註</label>
+  </div>
   </div>
   <div class="grp">
     <h2>高程誇張</h2>
@@ -344,6 +383,60 @@ function heightUV(u, v){
   L.visible = false;
 }
 
+// ---------- point cloud mode: survey points coloured by attribute ----------
+const CLOUD = M.cloud || [];
+const OBJCOL = { '設計鋪面': 0xe0a030, '設計綠地': 0x3f9f4a, '丁壩': 0x8a5cc2, '堤防／快速道路': 0x7d7d7d,
+  '花式溜冰場': 0x5a7fd6, '籃球場': 0xd0603a, '網球場': 0x2f8f80, '既有棒球場': 0xb08850, '球場': 0x4a78b0, '運動場': 0x6cae4a,
+  '生態池': 0x2c86c8, '生態池島': 0x2c86c8, '高燈': 0xe0c040 };
+const CODECOL = { '步道': 0xd2452f, '丁壩': 0x8a5cc2, '河岸': 0x2c6fd1, '水邊': 0x1aa3c4, '基準點': 0xe056c0, '其他': 0x9a8a50 };
+const ramp = t => { const c = new THREE.Color(); t = Math.min(Math.max(t, 0), 1);
+  return t < 0.5 ? c.setRGB(0.15 + t * 1.4, 0.35 + t * 1.1, 0.85 - t * 0.9) : c.setRGB(0.85 + (t - 0.5) * 0.3, 0.9 - (t - 0.5) * 1.3, 0.4 - (t - 0.5) * 0.6); };
+const zmin = Math.min(...CLOUD.map(p => p[2])), zmax = Math.max(...CLOUD.map(p => p[2]));
+let cloudPts;
+{
+  const L = layer('cloud'), pos = new Float32Array(CLOUD.length * 3), col = new Float32Array(CLOUD.length * 3);
+  CLOUD.forEach((p, i) => { pos[i * 3] = p[0]; pos[i * 3 + 1] = p[2] + 0.05; pos[i * 3 + 2] = p[1]; });
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  cloudPts = new THREE.Points(g, new THREE.PointsMaterial({ size: 5, sizeAttenuation: false, vertexColors: true, depthTest: false }));
+  cloudPts.renderOrder = 10;
+  L.add(cloudPts); L.visible = false;
+}
+function colourCloud(by){
+  const col = cloudPts.geometry.attributes.color.array, c = new THREE.Color();
+  CLOUD.forEach((p, i) => {
+    if (by === 'z') c.copy(ramp((p[2] - zmin) / (zmax - zmin)));
+    else if (by === 'code') c.set(CODECOL[p[5]] ?? 0x888888);
+    else if (by === 'obj') c.set(OBJCOL[p[6].split(' ')[0]] ?? 0x888888);
+    else if (by === 'off') c.set(p[6] !== '設計鋪面' && p[6] !== '設計綠地' ? 0x9a9a9a : p[4].endsWith('RD') ? (p[9] < 1 ? 0x2f9e44 : p[9] < 2 ? 0xf08c00 : 0xe03131) : 0xcfcfcf);
+    else { const d = p[2] - p[7]; c.copy(ramp(0.5 + d / 1.0)); }
+    col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+  });
+  cloudPts.geometry.attributes.color.needsUpdate = true;
+  const leg = document.getElementById('cloudLegend');
+  const sw = (c, t) => `<span class="lg"><span class="sw" style="background:#${new THREE.Color(c).getHexString()}"></span>${t}</span>`;
+  const count = k => CLOUD.filter(k).length;
+  if (by === 'z') leg.innerHTML = `<div class="bar"></div><div class="barlab"><span>EL ${zmin.toFixed(1)}</span><span>EL ${zmax.toFixed(1)}</span></div>`;
+  else if (by === 'code') leg.innerHTML = Object.entries(CODECOL).map(([k, v]) => sw(v, `${k}（${count(p => p[5] === k)}）`)).join('');
+  else if (by === 'obj') { const seen = {}; CLOUD.forEach(p => { const k = p[6].split(' ')[0]; seen[k] = (seen[k] || 0) + 1; });
+    leg.innerHTML = Object.entries(seen).sort((a, b) => b[1] - a[1]).map(([k, n]) => sw(OBJCOL[k] ?? 0x888888, `${k}（${n}）`)).join(''); }
+  else if (by === 'off') leg.innerHTML = sw(0x2f9e44, `步道點在設計鋪面上（${count(p => p[4].endsWith('RD') && p[9] < 1 && /設計/.test(p[6]))}）`) + sw(0xf08c00, `偏離 1–2 m（${count(p => p[4].endsWith('RD') && p[9] >= 1 && p[9] < 2)}）`) + sw(0xe03131, `偏離 2 m 以上（${count(p => p[4].endsWith('RD') && p[9] >= 2)}）`) + sw(0xcfcfcf, '非步道點');
+  else leg.innerHTML = `<div class="bar"></div><div class="barlab"><span>低於設計 0.5 m</span><span>相符</span><span>高於 0.5 m</span></div>`;
+}
+let cloudMode = false;
+function setMode(on){
+  cloudMode = on;
+  layers.cloud.visible = on;
+  for (const n of ['terrain', 'water', 'groyne', 'levee', 'light', 'fence', 'tree', 'spots', 'survey']) {
+    const el = document.getElementById('L-' + n);
+    layers[n].visible = on ? (n === 'terrain' ? document.getElementById('C-ground').checked : false) : (el ? el.checked : true);
+  }
+  const tm = window.TERRAIN.material;
+  tm.transparent = on; tm.opacity = on ? 0.22 : 1; tm.depthWrite = !on; tm.needsUpdate = true;
+  cloudPts.material.depthTest = !on ? true : false; cloudPts.renderOrder = on ? 10 : 0;
+  document.getElementById('modelPanel').hidden = on; document.getElementById('cloudPanel').hidden = !on;
+  if (on) colourCloud(document.querySelector('input[name="cby"]:checked').value);
+}
+
 // ---------- labels ----------
 const labelBox = document.getElementById('labels');
 const labelItems = [];
@@ -355,6 +448,10 @@ addLabel('生態池（水域棲地）', 520, 165, 5, 'small');
 
 // ---------- UI ----------
 const map = { 'L-terrain': 'terrain', 'L-water': 'water', 'L-groyne': 'groyne', 'L-levee': 'levee', 'L-light': 'light', 'L-fence': 'fence', 'L-survey': 'survey', 'L-tree': 'tree', 'L-spots': 'spots' };
+document.querySelectorAll('input[name="mode"]').forEach(r => r.addEventListener('change', () => r.checked && setMode(r.value === 'cloud')));
+document.querySelectorAll('input[name="cby"]').forEach(r => r.addEventListener('change', () => r.checked && colourCloud(r.value)));
+document.getElementById('C-ground').addEventListener('change', e => { layers.terrain.visible = e.target.checked; });
+document.getElementById('C-size').addEventListener('input', e => { cloudPts.material.size = +e.target.value; });
 document.querySelectorAll('input[name="surf"]').forEach(r => r.addEventListener('change', () => { if (r.checked) window.setSurface(r.value); }));
 document.querySelectorAll('input[name="tex"]').forEach(r => r.addEventListener('change', () => {
   if (!r.checked) return; const t = window.TEXS[r.value]; if (t) { window.TERRAIN.material.map = t; window.TERRAIN.material.needsUpdate = true; } }));
@@ -389,6 +486,18 @@ renderer.domElement.addEventListener('pointerdown', e => down = [e.clientX, e.cl
 renderer.domElement.addEventListener('pointerup', e => {
   if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) return;
   ptr.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ptr, camera);
+  if (cloudMode) {
+    // nearest survey point to the click in screen space
+    let best = -1, bd = 14 * 14; const v3 = new THREE.Vector3();
+    CLOUD.forEach((p, i) => { v3.set(p[0], (p[2] + 0.05) * world.scale.y, p[1]).project(camera);
+      if (v3.z > 1) return; const dx = (v3.x + 1) / 2 * innerWidth - e.clientX, dy = (1 - v3.y) / 2 * innerHeight - e.clientY;
+      const d = dx * dx + dy * dy; if (d < bd) { bd = d; best = i; } });
+    if (best < 0) return;
+    const p = CLOUD[best], [E, N] = toTWD(p[0], p[1]), dz = p[2] - p[7];
+    const offTxt = /設計/.test(p[6]) && p[4].endsWith('RD') ? `<br>距設計鋪面 ${p[9].toFixed(1)} m` : '';
+    document.getElementById('readout').innerHTML = `<b>測點 ${p[3]}（${p[5]}）</b><br>圖說同位置：${p[6]}${offTxt}<br>E ${E.toFixed(3)}<br>N ${N.toFixed(3)}<br>實測 EL ${p[2].toFixed(3)}<br>設計 EL ${p[7].toFixed(2)}（差 ${dz >= 0 ? '+' : ''}${dz.toFixed(2)}）<br>施工前 EL ${p[8].toFixed(2)}（L-03）`;
+    return;
+  }
   const hit = ray.intersectObjects([...layers.groyne.children, ...layers.terrain.children], false)[0];
   if (!hit) return;
   const p = hit.point, u = p.x, v = p.z, el = p.y / world.scale.y; const [E, N] = toTWD(u, v);
