@@ -40,6 +40,22 @@ button:hover{border-color:var(--accent);color:var(--accent)}
 button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 [hidden]{display:none!important}
 .stack{display:flex;flex-direction:column;gap:14px}
+.card{border:1px solid var(--line);border-radius:8px;padding:8px 10px;display:block}
+.card summary{cursor:pointer;font-size:13px;font-weight:700;list-style-position:inside}
+.card[open] summary{margin-bottom:8px}
+.card > * + *{margin-top:8px}
+.card h3{font-size:11px;letter-spacing:.08em;color:var(--muted);margin:12px 0 4px;font-weight:500}
+.defs{margin:0;display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:12px;line-height:1.55}
+.defs dt{font-weight:700;white-space:nowrap}
+.defs dd{margin:0;color:var(--fg)}
+.tag{font-size:10px;font-weight:500;background:var(--accent);color:var(--accent-fg);border-radius:3px;padding:0 4px;margin-left:2px}
+.tblwrap{overflow-x:auto}
+.gtab{border-collapse:collapse;font-size:11.5px;width:100%}
+.gtab th,.gtab td{border-bottom:1px solid var(--line);padding:4px 5px;text-align:left;vertical-align:top}
+.gtab th{color:var(--muted);font-weight:500}
+.gtab td.num{font-family:var(--f-num);font-variant-numeric:tabular-nums;white-space:nowrap}
+.ok{color:#2f9e44}.warn{color:#e8590c}
+.note a{color:var(--accent)}
 .seg{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);border-radius:7px;overflow:hidden}
 .seg label{cursor:pointer;text-align:center;font-size:13px}
 .seg input{position:absolute;opacity:0;pointer-events:none}
@@ -123,6 +139,33 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
       <button id="hlView" type="button">施工設施總覽視角</button>
     </div>
   </div>
+  <details class="card" id="gCard">
+    <summary>丁壩的作用</summary>
+    <label class="row"><input type="checkbox" id="GFX">顯示丁壩作用示意（動畫）</label>
+    <div class="legend">
+      <span class="lg"><span class="sw" style="background:#1e6fd9"></span>挑流：被丁壩推離岸邊的水流</span>
+      <span class="lg"><span class="sw" style="background:#e8590c"></span>河心主流：流速較快</span>
+      <span class="lg"><span class="sw" style="background:#d9b56a"></span>掛淤造灘：丁壩間流速變慢、泥砂沉積</span>
+      <span class="lg"><span class="sw" style="background:#2fa84f"></span>護岸：壩根後方的堤岸受到保護</span>
+    </div>
+    <h3>四種作用</h3>
+    <dl class="defs">
+      <dt>挑流</dt><dd>改變水流方向，把沿岸水流推往河心，讓主流離開堤岸。</dd>
+      <dt>護岸</dt><dd>和護岸一起配置，保護堤防與河岸；比單做護岸經濟，也較好維護。</dd>
+      <dt>減速促淤</dt><dd>兩座丁壩之間流速變慢，泥砂沉積，逐漸形成灘地（掛淤造灘）。</dd>
+      <dt>固定流路</dt><dd>在緩流河川穩定主流位置、保護河床。</dd>
+    </dl>
+    <h3>方向型式（依與河岸的夾角）</h3>
+    <dl class="defs">
+      <dt>直角型</dt><dd>適合急流或感潮河段；壩頭下游側容易沖刷。</dd>
+      <dt>向上型 <span class="tag">本案</span></dt><dd>壩頭朝向上游，利於固定流路，適合緩流河川；壩頭易沖刷、壩根易淤積。本案 13 座依圖面皆屬此型（θ 15–20°）。</dd>
+      <dt>向下型</dt><dd>壩頭較不易沖刷，但水流越過時壩根下游沖刷嚴重，較少採用。</dd>
+    </dl>
+    <h3>本案與設計經驗值比較</h3>
+    <div class="tblwrap"><table class="gtab"><thead><tr><th>項目</th><th>經驗值</th><th>本案</th></tr></thead><tbody id="gTable"></tbody></table></div>
+    <p class="note">本案數值依模型量測估算：河寬量到景美溪對岸（新店溪對岸不在模型範圍），壩高以壩頂 EL2.5、河床約 EL0.5 計。</p>
+    <p class="note">資料來源：經濟部水利署電子報第 459 期〈淺談丁壩設計〉（110.10.29），<a href="https://www.wra.gov.tw/epaper/Article_Detail.aspx?s=7161&amp;n=30173" target="_blank" rel="noopener">原文連結</a>。</p>
+  </details>
   <div class="grp">
     <h2>地形</h2>
     <label class="row"><input type="radio" name="surf" id="S-de" value="design" checked>設計完成地形（L-07 標高修正）</label>
@@ -450,6 +493,71 @@ function heightUV(u, v){
   L.visible = false;
 }
 
+// ---------- groyne function diagram (水利署電子報〈淺談丁壩設計〉): 挑流 arrows, 掛淤 zones, 護岸 strip ----------
+function flowAt(u, v){
+  let bd = 1e18, dx = 1, dy = 0;
+  for (const ln of (M.flow ? [M.flow.jm, M.flow.xd] : [])) for (let k = 0; k < ln.length - 1; k++) {
+    const ax = ln[k][0], ay = ln[k][1], ex = ln[k + 1][0] - ax, ey = ln[k + 1][1] - ay, l2 = ex * ex + ey * ey;
+    const t = Math.max(0, Math.min(1, ((u - ax) * ex + (v - ay) * ey) / l2)), qx = ax + ex * t - u, qy = ay + ey * t - v, d = qx * qx + qy * qy;
+    if (d < bd) { bd = d; const l = Math.sqrt(l2); dx = ex / l; dy = ey / l; } }
+  return [dx, dy];
+}
+const gfxArrows = [];
+{
+  const L = layer('gfx'); L.visible = false;
+  const WY = 1.25;
+  const coneG = new THREE.ConeGeometry(0.55, 1.6, 10); coneG.rotateZ(-Math.PI / 2);      // points along +x
+  const arrowM = new THREE.MeshBasicMaterial({ color: 0x1e6fd9 });
+  const fastM = new THREE.MeshBasicMaterial({ color: 0xe8590c });
+  const banks = { '景': [], '新': [] };
+  for (const g of M.groynes) {
+    const r = new THREE.Vector2(...g.root), t = new THREE.Vector2(...g.tip), a = t.clone().sub(r).normalize();
+    const [fx, fy] = flowAt(r.x, r.y), f = new THREE.Vector2(fx, fy), Lg = r.distanceTo(t);
+    const P = (base, al, fl) => new THREE.Vector3(base.x + a.x * al + f.x * fl, WY, base.y + a.y * al + f.y * fl);
+    // 挑流: water along the bank meets the groyne and is pushed out past the tip toward the channel centre
+    const deflect = new THREE.CatmullRomCurve3([P(r, Lg * 0.45, -16), P(r, Lg * 0.6, -6), P(t, 1.8, -1.5), P(t, 4.5, 4), P(t, 6.5, 13)]);
+    // main current further out keeps running straight and faster
+    const main = new THREE.CatmullRomCurve3([P(t, 9, -16), P(t, 9.5, 0), P(t, 9, 16)]);
+    for (const [curve, mat, n] of [[deflect, arrowM, 5], [main, fastM, 4]]) {
+      const cones = [];
+      for (let k = 0; k < n; k++) { const m = new THREE.Mesh(coneG, mat); L.add(m); cones.push(m); }
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(40)),
+        new THREE.LineBasicMaterial({ color: mat.color, transparent: true, opacity: 0.45 }));
+      L.add(line); gfxArrows.push({ curve, cones, speed: mat === fastM ? 0.22 : 0.14 });
+    }
+    banks[g.name[0]].push(g);
+  }
+  // 掛淤造灘: slow water between neighbouring groynes, behind the line of tips
+  const sandM = new THREE.MeshBasicMaterial({ color: 0xd9b56a, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false });
+  const protM = new THREE.MeshBasicMaterial({ color: 0x2fa84f, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false });
+  window.GFX_SPOTS = [];
+  for (const k of ['景', '新']) {
+    const gs = banks[k].sort((p, q) => p.root[0] - q.root[0]);
+    for (let i = 0; i < gs.length - 1; i++) {
+      const a1 = gs[i], a2 = gs[i + 1];
+      if (Math.hypot(a2.root[0] - a1.root[0], a2.root[1] - a1.root[1]) > 45) continue;
+      const lerp = (p, q, s) => [p[0] + (q[0] - p[0]) * s, p[1] + (q[1] - p[1]) * s];
+      const pts = [lerp(a1.root, a1.tip, 0.3), lerp(a1.root, a1.tip, 0.85), lerp(a2.root, a2.tip, 0.85), lerp(a2.root, a2.tip, 0.3)];
+      const sh = new THREE.Shape(pts.map(p => new THREE.Vector2(p[0], p[1])));
+      const sg = new THREE.ShapeGeometry(sh, 6); sg.rotateX(Math.PI / 2);
+      { const pa = sg.attributes.position.array;
+        for (let q = 0; q < pa.length; q += 3) pa[q + 1] = Math.max(heightUV(pa[q], pa[q + 2]) + 0.2, WY + 0.05); }
+      L.add(new THREE.Mesh(sg, sandM));
+      if (i === 1) window.GFX_SPOTS.push(['掛淤造灘（減速促淤）', (pts[0][0] + pts[2][0]) / 2, (pts[0][1] + pts[2][1]) / 2]);
+    }
+    // 護岸: bank line behind the roots
+    const bank = gs.map(g => new THREE.Vector3(g.root[0], Math.max(heightUV(g.root[0], g.root[1]), WY) + 0.6, g.root[1]));
+    if (bank.length > 1) {
+      const tube = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(bank), 60, 0.9, 6, false);
+      L.add(new THREE.Mesh(tube, protM));
+      const mid = gs[Math.floor(gs.length / 2)];
+      window.GFX_SPOTS.push(['護岸（保護堤岸）', mid.root[0], mid.root[1]]);
+    }
+  }
+  const g2 = M.groynes.find(g => g.name === '景4') || M.groynes[0];
+  window.GFX_SPOTS.push(['挑流（水流被推離岸邊）', g2.tip[0] + 2, g2.tip[1] - 6]);
+}
+
 // ---------- new construction (L-06 數量表): paving / revetment overlay + facility objects ----------
 const FAC = M.newFacilities || [];
 const FACCOL = { wash: 0x18a8e0, drop: 0x7a52d6, rock: 0xb3622d, perch: 0x22a36b, log: 0x8a5a2b, bench: 0xe0b020 };
@@ -562,6 +670,7 @@ function setMode(on){
   cloudMode = on;
   layers.cloud.visible = on;
   if (on && HL) { document.getElementById('HL').checked = false; setHighlight(false); }
+  if (on && GFX) { document.getElementById('GFX').checked = false; document.getElementById('GFX').dispatchEvent(new Event('change')); }
   for (const n of ['terrain', 'water', 'groyne', 'levee', 'light', 'fence', 'tree', 'spots', 'survey', 'newfac']) {
     const el = document.getElementById('L-' + n);
     layers[n].visible = on ? (n === 'terrain' ? document.getElementById('C-ground').checked : false) : (el ? el.checked : true);
@@ -586,10 +695,40 @@ addLabel('生態池（水域棲地）', 520, 165, 5, 'small');
     if (f.kind === 'bench') { if (benchDone) continue; benchDone = true; }
     addLabel(f.kind === 'bench' ? '休憩座椅 40 m' : shortN[f.kind], f.uv[0], f.uv[1], heightUV(f.uv[0], f.uv[1]) + 9, 'fac');
     const it = labelItems[labelItems.length - 1]; it.hl = true; it.el.hidden = true; it.el.style.setProperty('--c', '#' + new THREE.Color(FACCOL[f.kind]).getHexString()); } }
+for (const [txt, u, v] of window.GFX_SPOTS || []) {
+  addLabel(txt, u, v, 6, 'fac'); const it = labelItems[labelItems.length - 1]; it.gfx = true; it.el.hidden = true;
+  it.el.style.setProperty('--c', txt.startsWith('掛淤') ? '#a8803a' : txt.startsWith('護岸') ? '#2f8a45' : '#1e6fd9'); }
 
 // ---------- UI ----------
 const map = { 'L-terrain': 'terrain', 'L-water': 'water', 'L-groyne': 'groyne', 'L-levee': 'levee', 'L-light': 'light', 'L-fence': 'fence', 'L-survey': 'survey', 'L-tree': 'tree', 'L-spots': 'spots', 'L-newfac': 'newfac' };
 document.getElementById('HL').addEventListener('change', e => setHighlight(e.target.checked));
+// groyne card: comparison table + diagram toggle
+const GI = M.groyneInfo || [];
+{
+  const rng = (arr, d = 1) => { const v = arr.filter(x => x != null); return v.length ? `${Math.min(...v).toFixed(d)}–${Math.max(...v).toFixed(d)}` : '—'; };
+  const jmI = GI.filter(g => g.name.startsWith('景'));
+  const sh = GI.filter(g => g.spacing).map(g => g.spacing / g.h);
+  const lw = jmI.map(g => g.LW), over = jmI.filter(g => g.LW > 20).map(g => g.name);
+  const rows = [
+    ['長度／河寬', '10–20%', `${rng(lw)}%`, over.length ? `warn">${over.join('、')} 略超過` : 'ok">符合'],
+    ['間距／長度', '直岸 2–3 倍<br>凹岸 1.5–2 倍<br>凸岸 2.5–3.5 倍', `${rng(GI.map(g => g.SL))} 倍`, 'warn">比經驗值寬'],
+    ['間距／壩高', '10–30 倍', `${rng(sh)} 倍`, 'ok">符合'],
+    ['壩高／計畫水深', '0.1–0.4', '—', '">圖說未取得計畫水深'],
+    ['頂寬', '至少 4 m（重機通行）', '1 m', 'warn">遠小於建議值'],
+    ['方向', '緩流河川宜向上型', '向上型 θ 15–20°', 'ok">符合'],
+  ];
+  document.getElementById('gTable').innerHTML = rows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td class="num">${r[2]}<br><span class="${r[3]}</span></td></tr>`).join('');
+}
+let GFX = false;
+document.getElementById('GFX').addEventListener('change', e => {
+  GFX = e.target.checked; layers.gfx.visible = GFX;
+  for (const it of labelItems) if (it.gfx) it.el.hidden = !GFX;
+  if (GFX) {
+    const js = M.groynes.filter(g => /^景[3-6]$/.test(g.name));
+    const cx = js.reduce((s, g) => s + g.tip[0], 0) / js.length, cz = js.reduce((s, g) => s + g.tip[1], 0) / js.length;
+    camera.position.set(cx - 15, 110, cz - 70); controls.target.set(cx, 0, cz + 2); controls.update();   // from the river side, so trees don't block
+  }
+});
 const flowChk = document.getElementById('L-flow'); if (reduceMotion) flowChk.checked = false;
 flowChk.addEventListener('change', () => waterUniforms.forEach(u => u.uFlowOn.value = flowChk.checked ? 1 : 0));
 document.getElementById('hlView').addEventListener('click', () => go('overview'));
@@ -656,6 +795,13 @@ renderer.domElement.addEventListener('pointerup', e => {
   const ex = hEx(u, v), de = hDe(u, v), dz = de - ex;
   let near = null, nd = 1e9;
   for (const t of window.TREE_LIST || []) { const dd = Math.hypot(t.uv[0] - u, t.uv[1] - v); if (dd < Math.max(t.crown / 2, 2) && dd < nd) { nd = dd; near = t; } }
+  const gi = g ? GI.find(x => x.name === g.name) : null;
+  if (gi) {
+    document.getElementById('readout').innerHTML = `<b>丁壩 ${g.name}（${gi.type}）</b><br>長 L=${g.L} m　θ=${g.theta}°　壩高約 ${gi.h} m<br>` +
+      (gi.LW ? `河寬約 ${gi.width} m，L／河寬 ${gi.LW}%<br>` : '') + (gi.spacing ? `至下一座 ${gi.spacing} m（${gi.SL} 倍長度）<br>` : '') +
+      `作用：挑流、護岸、減速促淤<br>E ${E.toFixed(2)}　N ${N.toFixed(2)}`;
+    return;
+  }
   const head = g ? '丁壩 ' + g.name + `（L=${g.L} m, θ=${g.theta}°）` : near ? `喬木 ${near.id} ${near.name}（冠幅 ${near.crown} m，高 ${near.h} m${near.status === 'move' ? '，區內移植' : ''}）` : '地面';
   document.getElementById('readout').innerHTML = `<b>${head}</b><br>E ${E.toFixed(2)}<br>N ${N.toFixed(2)}<br>現況 EL ${ex.toFixed(2)}　設計 EL ${de.toFixed(2)}<br>${Math.abs(dz) < 0.05 ? '挖填平衡' : (dz > 0 ? '填方 +' : '挖方 ') + dz.toFixed(2) + ' m'}`;
 });
@@ -666,6 +812,13 @@ const clock = new THREE.Clock();
 function tick(){
   const t = clock.getElapsedTime();
   for (const u of waterUniforms) u.uTime.value = t;
+  if (GFX) {
+    const tt = flowChk.checked ? t : 0;
+    for (const a of gfxArrows) a.cones.forEach((c, k) => {
+      const s = (tt * a.speed + k / a.cones.length) % 1, p = a.curve.getPointAt(s), d = a.curve.getTangentAt(s);
+      c.position.copy(p); c.rotation.set(0, Math.atan2(-d.z, d.x), 0);
+    });
+  }
   if (HL) {
     const s = 1 + 0.35 * (0.5 + 0.5 * Math.sin(t * 3)), op = 0.45 + 0.4 * (0.5 + 0.5 * Math.sin(t * 3));
     for (const b of beacons) { const r = b.children[2]; r.scale.setScalar(s); r.material.opacity = 1.1 - op; }
