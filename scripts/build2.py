@@ -116,18 +116,9 @@ diff = H_de - H_ex
 print('cut/fill m3 (grid, park side):', round(float(diff[diff > 0].sum() * STEP * STEP)), round(float(diff[diff < 0].sum() * STEP * STEP)))
 
 # ---------- channel (引水道) water: chain WS points ----------
-ws = [(u, w, v) for u, w, v, k in design if k == 'WS']
-chains = []
-if ws:
-    rem = sorted(ws)
-    cur = [rem.pop(0)]
-    while rem:
-        dists = [math.dist(cur[-1][:2], q[:2]) for q in rem]
-        j = int(np.argmin(dists))
-        if dists[j] > 70: chains.append(cur); cur = [rem.pop(0)]
-        else: cur.append(rem.pop(j))
-    chains.append(cur)
-channels = [[[round(u, 2), round(w, 2), round(v - 0.2, 2)] for u, w, v in ch] for ch in chains if len(ch) >= 2]
+sys.path.insert(0, SCR)
+from channels import make_chains          # WS labels → channel lines (monotonic, ≤45 m links, no jump into the eco-pond)
+channels = make_chains(design)
 
 # ---------- trees ----------
 table = json.load(open(SCR + '/trees_table.json', encoding='utf-8'))
