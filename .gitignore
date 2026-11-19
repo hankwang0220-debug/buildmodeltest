@@ -1,0 +1,8 @@
+# 原始圖說與測量檔不上傳
+*.tif
+*.tiff
+*.dxf
+*.pdf
+*.csv
+__pycache__/
+*.pyc
